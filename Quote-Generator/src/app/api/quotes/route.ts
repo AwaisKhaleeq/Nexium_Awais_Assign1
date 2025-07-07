@@ -1,21 +1,37 @@
-// app/api/quotes/route.ts
-import { connectToDB } from "@/lib/mongodb"
-import { Quote } from "@/models/Quote"
 import { NextRequest, NextResponse } from "next/server"
+import mongoose from "mongoose"
 
-export async function GET() {
-  await connectToDB()
-  const quotes = await Quote.find().limit(3)
-  return NextResponse.json(quotes)
+const MONGODB_URI = process.env.MONGODB_URI!
+
+// Reuse connection if already connected
+if (!mongoose.connection.readyState) {
+  await mongoose.connect(MONGODB_URI)
 }
 
-export async function POST(req: NextRequest) {
-  const { text, topic } = await req.json()
-  if (!text || !topic) {
-    return NextResponse.json({ error: "Missing fields" }, { status: 400 })
+// Define schema
+const QuoteSchema = new mongoose.Schema({
+  text: String,
+  topic: String,
+})
+
+const Quote = mongoose.models.Quote || mongoose.model("Quote", QuoteSchema)
+
+export async function GET(req: NextRequest) {
+  const topic = req.nextUrl.searchParams.get("topic")?.toLowerCase()
+
+  if (!topic) {
+    return NextResponse.json({ error: "Topic query param is required" }, { status: 400 })
   }
 
-  await connectToDB()
-  const newQuote = await Quote.create({ text, topic })
-  return NextResponse.json(newQuote)
+  try {
+    // Only fetch quotes that match the topic (case-insensitive)
+    const quotes = await Quote.find({
+      topic: { $regex: new RegExp(topic, "i") },
+    })
+
+    return NextResponse.json(quotes)
+  } catch (err) {
+    console.error("❌ Error fetching quotes:", err)
+    return NextResponse.json({ error: "Something went wrong" }, { status: 500 })
+  }
 }
